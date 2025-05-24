@@ -3,6 +3,8 @@ import streamlit as st
 import asyncio
 import nest_asyncio
 import time
+import logging
+import sys
 from supabase import create_client, Client
 
 from typing import Literal, TypedDict
@@ -11,6 +13,16 @@ from typing import Literal, TypedDict
 from LLMConnection import process_query
 nest_asyncio.apply()
 
+# Configure logging for the UI
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
 # Supabase configuration - Add your credentials here
 SUPABASE_URL = st.secrets["SUPABASE_URL"]  # or replace with your actual URL
 SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_KEY"]  # or replace with your actual key
@@ -18,6 +30,7 @@ SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_KEY"]  # or replace with your actual
 # Initialize Supabase client
 @st.cache_resource
 def init_supabase():
+    logger.info("Initializing Supabase client")
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Language translations
@@ -109,6 +122,7 @@ def get_text(key: str, lang: str) -> str:
 
 def save_rating_to_supabase(supabase: Client, timestamp, user_msg, assistant_msg, helpfulness, expectation, response_time):
     """Save rating to Supabase database"""
+    logger.info(f"Attempting to save rating - Helpfulness: {helpfulness}, Expectation: {expectation}")
     try:
         data = {
             "timestamp": timestamp,
@@ -120,13 +134,15 @@ def save_rating_to_supabase(supabase: Client, timestamp, user_msg, assistant_msg
         }
 
         result = supabase.table("chatbot_ratings").insert(data).execute()
-        print(result)
+        logger.info(f"Rating saved successfully to database: {result.data}")
         return True, "Rating saved successfully!"
     except Exception as e:
+        logger.error(f"Error saving rating to database: {str(e)}")
         return False, f"Error saving rating: {str(e)}"
 
 def save_feedback_to_supabase(supabase: Client, feedback_text):
     """Save general feedback to Supabase database"""
+    logger.info(f"Attempting to save feedback: {feedback_text[:50]}...")
     try:
         data = {
             "feedback_text": feedback_text,
@@ -134,12 +150,15 @@ def save_feedback_to_supabase(supabase: Client, feedback_text):
         }
 
         result = supabase.table("general_feedback").insert(data).execute()
-        print(result)
+        logger.info(f"Feedback saved successfully to database: {result.data}")
         return True, "Feedback saved successfully!"
     except Exception as e:
+        logger.error(f"Error saving feedback to database: {str(e)}")
         return False, f"Error saving feedback: {str(e)}"
 
 async def main():
+    logger.info("Starting Streamlit application")
+
     # Initialize Supabase client
     supabase = init_supabase()
 
@@ -152,9 +171,10 @@ async def main():
             format_func=lambda x: "🇬🇧 English" if x == "en" else "🇳🇱 Nederlands",
             index=1  # Default to Dutch
         )
-        
+        logger.debug(f"User selected language: {language}")
+
         st.markdown("---")
-        
+
         st.title(get_text("sidebar_title", language))
         st.write(get_text("sidebar_description", language))
 
@@ -172,13 +192,17 @@ async def main():
             feedback = st.text_area(get_text("feedback_placeholder", language), "")
             if st.button(get_text("submit_feedback_button", language)):
                 if feedback.strip():
+                    logger.info("User submitted feedback")
                     success, message = save_feedback_to_supabase(supabase, feedback.strip())
                     if success:
                         st.success(get_text("feedback_success", language))
+                        logger.info("Feedback submission successful")
                     else:
                         st.error(f"{get_text('feedback_error', language)} {message}")
+                        logger.error(f"Feedback submission failed: {message}")
                 else:
                     st.warning(get_text("feedback_warning", language))
+                    logger.warning("User tried to submit empty feedback")
 
     # Set up Streamlit UI
     st.title(get_text("title", language))
@@ -186,10 +210,14 @@ async def main():
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
+        logger.debug("Initialized empty message history")
 
     # Initialize ratings dictionary if it doesn't exist
     if "ratings" not in st.session_state:
         st.session_state.ratings = {}
+        logger.debug("Initialized empty ratings dictionary")
+
+    logger.debug(f"Current session has {len(st.session_state.messages)} messages")
 
     # Display chat history with timestamps and ratings
     for i, msg in enumerate(st.session_state.messages):
@@ -245,6 +273,8 @@ async def main():
                     # Submit button for ratings
                     if st.button(get_text("submit_rating_button", language), key=f"submit_{i}"):
                         if helpfulness_rating and expectation_rating:
+                            logger.info(f"User submitted rating - Message {i}: Helpfulness={helpfulness_rating}, Expectation={expectation_rating}")
+
                             # Store the ratings in session state
                             st.session_state.ratings[helpfulness_key] = helpfulness_rating
                             st.session_state.ratings[expectation_key] = expectation_rating
@@ -267,12 +297,15 @@ async def main():
 
                             if success:
                                 st.success(get_text("rating_success", language))
+                                logger.info("Rating saved successfully")
                             else:
                                 st.error(f"{get_text('rating_error', language)} {message}")
+                                logger.error(f"Rating save failed: {message}")
 
                             st.rerun()
                         else:
                             st.error(get_text("rating_warning", language))
+                            logger.warning("User tried to submit incomplete rating")
                 else:
                     # Show the existing ratings
                     helpfulness = st.session_state.ratings.get(helpfulness_key, 0)
@@ -292,6 +325,8 @@ async def main():
     user_input = st.chat_input(get_text("chat_placeholder", language))
 
     if user_input:
+        logger.info(f"User submitted new query: {user_input[:50]}...")
+
         # Add user message to session state
         st.session_state.messages.append(
             {
@@ -308,12 +343,14 @@ async def main():
         # Show a spinner while getting the response
         with st.spinner(get_text("generating_answer", language)):
             start_time = time.time()  # Start timing
+            logger.info("Starting query processing")
 
             # Process query using RAG system
             response = await process_query(user_input, st.session_state.messages)
 
             end_time = time.time()  # End timing
             elapsed_time = round(end_time - start_time, 2)  # In seconds
+            logger.info(f"Query processed successfully in {elapsed_time} seconds")
 
             st.session_state.messages.append(
                 {
@@ -328,4 +365,5 @@ async def main():
         st.rerun()
 
 if __name__ == "__main__":
+    logger.info("Application started from main")
     asyncio.run(main())

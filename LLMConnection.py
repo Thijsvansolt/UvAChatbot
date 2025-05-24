@@ -3,8 +3,20 @@ from supabase import create_client, Client
 import asyncio
 from typing import List
 from langdetect import detect
+import logging
+import sys
 
 import streamlit as st
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Initialize OpenAI and Supabase clients
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -86,10 +98,11 @@ async def detect_language(text: str) -> str:
             'fr': 'french',
             'es': 'spanish'
         }
-        return lang_mapping.get(detected_lang)
-    except:
-        # Fallback: assume English if detection fails
-        return 'Dutch'
+        return lang_mapping.get(detected_lang, 'dutch')
+    except Exception as e:
+        logger.warning(f"Language detection failed: {e}, defaulting to Dutch")
+        # Fallback: assume Dutch if detection fails
+        return 'dutch'
 
 async def translate_query_to_dutch(query: str) -> str:
     """
@@ -109,9 +122,10 @@ async def translate_query_to_dutch(query: str) -> str:
             query,
             "Translate this query about UvA computer science to Dutch:"
         )
+        logger.info(f"Successfully translated query to Dutch")
         return translated_query.strip()
     except Exception as e:
-        print(f"Error during query translation: {e}")
+        logger.error(f"Error during query translation: {e}")
         return query  # Return original query on error
 
 async def translate_context_to_original_language(context: str, target_language: str) -> str:
@@ -134,9 +148,10 @@ async def translate_context_to_original_language(context: str, target_language: 
             context,
             f"Translate this Dutch UvA context to {target_language}:"
         )
+        logger.info(f"Successfully translated context to {target_language}")
         return translated_context.strip()
     except Exception as e:
-        print(f"Error during context translation: {e}")
+        logger.error(f"Error during context translation: {e}")
         return context  # Return original context on error
 
 async def get_embedding(text: str) -> List[float]:
@@ -146,9 +161,10 @@ async def get_embedding(text: str) -> List[float]:
             model="text-embedding-3-small",
             input=text
         )
+        logger.debug("Successfully generated embedding")
         return response.data[0].embedding
     except Exception as e:
-        print(f"Error getting embedding: {e}")
+        logger.error(f"Error getting embedding: {e}")
         return [0] * 1536  # Return zero vector on error
 
 async def retrieve_documentation(user_query: str, original_language: str = None):
@@ -158,6 +174,7 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
     """
     # Check if the user query is empty
     if not user_query.strip():
+        logger.warning("Empty user query provided")
         return "Please provide a valid query."
 
     try:
@@ -166,33 +183,40 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
             original_language = await detect_language(user_query)
 
         search_query = user_query
+        logger.info(f"Processing query in {original_language}")
 
         # If the query is not in Dutch, translate it
         if original_language != 'dutch':
-            print(f"Detected {original_language} query, translating to Dutch for search...")
+            logger.info(f"Detected {original_language} query, translating to Dutch for search...")
             search_query = await translate_query_to_dutch(user_query)
-            print(f"Translated query: {search_query}")
+            logger.info(f"Translated query: {search_query}")
 
         # Get the embedding for the search query
+        logger.debug("Generating embedding for search query")
         query_embedding = await get_embedding(search_query)
 
         # Query Supabase for relevant documents
+        logger.info("Querying Supabase for relevant documents")
         result = supabase.rpc(
             'match_uva_pages',
                 {
                 'query_embedding': query_embedding,
                 'match_count': 7,
                 'filter': {},
-                'similarity_threshold': 0.7  # Adjust this value based on testing
+                'similarity_threshold': 0.6  # Adjust this value based on testing
                 }
             ).execute()
 
-        # print(f"Supabase result: {result}")
-        for doc in result.data:
-            print(f"Document ID: {doc['id']}")
-            print(f"Document: {doc['title']}, Content: {doc['content']}")
+        logger.info(f"Supabase returned {len(result.data) if result.data else 0} documents")
+
+        # Log document details
+        if result.data:
+            for doc in result.data:
+                logger.debug(f"Document ID: {doc['id']}, Title: {doc['title']}")
+                logger.debug(f"Content preview: {doc['content'][:100]}...")
 
         if not result.data:
+            logger.warning("No relevant documentation found")
             return "No relevant documentation found."
 
         # Format the results
@@ -207,19 +231,21 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
 
         # Join all chunks with a separator
         dutch_context = "\n\n---\n\n".join(formatted_chunks)
+
         # If the original query was not in Dutch, translate the context back
         if original_language != 'dutch':
-            print(f"Translating context back to {original_language}...")
+            logger.info(f"Translating context back to {original_language}...")
             translated_context = await translate_context_to_original_language(
                 dutch_context,
                 original_language
             )
             return translated_context
-        print("Not translated, returning Dutch context.")
+
+        logger.info("Returning Dutch context (no translation needed)")
         return dutch_context
 
     except Exception as e:
-        print(f"Error retrieving documentation: {e}")
+        logger.error(f"Error retrieving documentation: {e}")
         return f"Error retrieving documentation: {str(e)}"
 
 async def process_query(user_prompt, chat_history=None):
@@ -229,44 +255,55 @@ async def process_query(user_prompt, chat_history=None):
     if chat_history is None:
         chat_history = []
 
+    logger.info(f"Processing new user query: {user_prompt[:50]}...")
+
     # Detect the language of the user's query
     original_language = await detect_language(user_prompt)
-    print(f"Detected language: {original_language}")
+    logger.info(f"Detected language: {original_language}")
 
     # Format chat history
     # take the last 5 messages for context if available
     chat_history = chat_history[-7:] if len(chat_history) > 5 else chat_history
+    logger.debug(f"Using {len(chat_history)} messages from chat history")
 
     # Format chat history for the prompt
     str_history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history])
     chat_history_text = f"Chat history:\n{str_history}"
 
     # Retrieve documentation
+    logger.info("Retrieving relevant documentation")
     results = await retrieve_documentation(user_prompt, original_language)
 
     # Combine context
     context = f"{chat_history_text}\n\n{results}"
+    logger.debug(f"Combined context length: {len(context)} characters")
 
     # Get the final answer
+    logger.info("Generating final response")
     answer = await translate_final_response(
         Master_prompt,
         user_prompt,
         context,
         response_language=original_language
     )
+
+    logger.info("Successfully generated response")
     return answer
 
 # Example usage
 if __name__ == "__main__":
-    print("Ask your question about computer science at UvA in any language (type 'exit' to stop):")
-    print("Stel je vraag over informatica aan de UvA in elke taal (typ 'exit' om te stoppen):")
+    logger.info("Starting interactive mode")
+    logger.info("Ask your question about computer science at UvA in any language (type 'exit' to stop):")
+    logger.info("Stel je vraag over informatica aan de UvA in elke taal (typ 'exit' om te stoppen):")
 
     while True:
         user_input = input("You/Jij: ")
         if user_input.lower() == "exit":
+            logger.info("Exiting interactive mode")
             break
 
         # Run the async function with asyncio
         response = asyncio.run(process_query(user_input))
+        logger.info(f"Generated response: {response[:100]}...")
         print(f"Smart assistant: {response}")
         print("-" * 50)
