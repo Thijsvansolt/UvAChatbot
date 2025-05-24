@@ -1,16 +1,14 @@
 from openai import AsyncOpenAI
 from supabase import create_client, Client
 import asyncio
-from typing import List, Tuple
-import os
-from dotenv import load_dotenv, find_dotenv
+from typing import List
 from langdetect import detect
 
 import streamlit as st
 
 # Initialize OpenAI and Supabase clients
-SUPABASE_URL = st.secrets["SUPABASE_URL"]  # or replace with your actual URL
-SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_KEY"]  # or replace with your actual key
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_KEY"]
 
 # Initialize Supabase client
 @st.cache_resource
@@ -236,8 +234,8 @@ async def process_query(user_prompt, chat_history=None):
     print(f"Detected language: {original_language}")
 
     # Format chat history
-    # take the last 7 messages for context if available
-    chat_history = chat_history[-7:] if len(chat_history) > 7 else chat_history
+    # take the last 5 messages for context if available
+    chat_history = chat_history[-7:] if len(chat_history) > 5 else chat_history
 
     # Format chat history for the prompt
     str_history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history])

@@ -3,11 +3,11 @@ from openai import OpenAI, AsyncOpenAI
 import asyncio
 from typing import List
 import os
-from dotenv import load_dotenv, find_dotenv
+import streamlit as st
 
-load_dotenv(find_dotenv())
+# Initialize OpenAI client
+openai_client = AsyncOpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 async def get_completion(prompt, question, context):
     completion = await openai_client.chat.completions.create(
