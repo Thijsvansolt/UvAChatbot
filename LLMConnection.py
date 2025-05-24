@@ -203,7 +203,7 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
                 'query_embedding': query_embedding,
                 'match_count': 7,
                 'filter': {},
-                'similarity_threshold': 0.6  # Adjust this value based on testing
+                'similarity_threshold': 0.4  # Adjust this value based on testing
                 }
             ).execute()
 
