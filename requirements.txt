@@ -1,4 +1,8 @@
-python-dotenv
+streamlit
 openai
 supabase
+python-dotenv
 crawl4ai
+asyncio
+nest_asyncio
+langdetect
