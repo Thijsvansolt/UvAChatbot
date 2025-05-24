@@ -203,7 +203,7 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
                 'query_embedding': query_embedding,
                 'match_count': 7,
                 'filter': {},
-                'similarity_threshold': 0.4  # Adjust this value based on testing
+                'similarity_threshold': 0.7  # Adjust this value based on testing
                 }
             ).execute()
 
@@ -213,7 +213,7 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
         if result.data:
             for doc in result.data:
                 logger.info(f"Document ID: {doc['id']}, Title: {doc['title']}")
-                logger.info(f"Content preview: {doc['content'][:100]}...")
+                logger.info(f"Content preview: {doc['content']}...")
 
         if not result.data:
             logger.warning("No relevant documentation found")
