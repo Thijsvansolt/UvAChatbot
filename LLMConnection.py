@@ -212,8 +212,8 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
         # Log document details
         if result.data:
             for doc in result.data:
-                logger.debug(f"Document ID: {doc['id']}, Title: {doc['title']}")
-                logger.debug(f"Content preview: {doc['content'][:100]}...")
+                logger.info(f"Document ID: {doc['id']}, Title: {doc['title']}")
+                logger.info(f"Content preview: {doc['content'][:100]}...")
 
         if not result.data:
             logger.warning("No relevant documentation found")
