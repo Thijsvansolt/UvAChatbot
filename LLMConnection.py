@@ -201,9 +201,9 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
             'match_uva_pages',
                 {
                 'query_embedding': query_embedding,
-                'match_count': 7,
+                'match_count': 10,
                 'filter': {},
-                'similarity_threshold': 0.7  # Adjust this value based on testing
+                'similarity_threshold': 0.5  # Adjust this value based on testing
                 }
             ).execute()
 
