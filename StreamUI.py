@@ -20,10 +20,92 @@ SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_KEY"]  # or replace with your actual
 def init_supabase():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# Language translations
+TRANSLATIONS = {
+    "en": {
+        "title": "UvA Computer Science Chatbot",
+        "sidebar_title": "Computer Science Program at UvA",
+        "sidebar_description": "This is a chatbot that can help you with questions about the Computer Science program at the University of Amsterdam. Feel free to ask your questions and receive answers based on the available documentation.",
+        "about_title": "About this chatbot",
+        "about_description": "This chatbot was developed for the UvA Computer Science program and uses RAG technology to answer questions based on program documentation available on multiple UvA websites.",
+        "rating_system_title": "Rating System",
+        "rating_system_description": "After each response, you can rate the chatbot on two aspects:",
+        "helpfulness_label": "🌟 **Helpfulness**: How helpful was the response? (1-5 stars)",
+        "expectations_label": "🎯 **Expectations**: Did the response meet your expectations? (1-5 stars)",
+        "rating_help_text": "Your ratings help us improve the chatbot!",
+        "feedback_title": "General Feedback",
+        "feedback_description": "If you have any additional feedback or suggestions for improvement, please let us know!",
+        "feedback_placeholder": "Your feedback",
+        "submit_feedback_button": "Submit Feedback",
+        "feedback_success": "Feedback saved successfully!",
+        "feedback_error": "Error saving feedback:",
+        "feedback_warning": "Please enter some feedback before submitting.",
+        "main_description": "Ask your questions about the Computer Science program at UvA.",
+        "user_label": "User",
+        "assistant_label": "Smart Assistant",
+        "response_time": "Response generated in",
+        "seconds": "seconds",
+        "rate_response": "📊 Rate this Response",
+        "helpful_question": "🌟 **How helpful was this answer?**",
+        "expectation_question": "🎯 **Did this meet your expectations?**",
+        "submit_rating_button": "Submit Rating",
+        "rating_success": "✅ Thank you for your rating!",
+        "rating_error": "❌",
+        "rating_warning": "⚠️ Please provide both helpfulness and expectation ratings before submitting.",
+        "your_rating": "📊 **Your Rating:**",
+        "helpfulness_rating": "🌟 Helpfulness:",
+        "expectation_rating": "🎯 Expectations:",
+        "chat_placeholder": "Ask your question about the Computer Science program...",
+        "generating_answer": "Generating answer...",
+        "language_toggle": "Language / Taal"
+    },
+    "nl": {
+        "title": "UvA Informatica Chatbot",
+        "sidebar_title": "Informatica Programma aan de UvA",
+        "sidebar_description": "Dit is een chatbot die je kan helpen met vragen over het Informatica programma aan de Universiteit van Amsterdam. Stel gerust je vragen en ontvang antwoorden gebaseerd op de beschikbare documentatie.",
+        "about_title": "Over deze chatbot",
+        "about_description": "Deze chatbot is ontwikkeld voor het UvA Informatica programma en gebruikt RAG technologie om vragen te beantwoorden gebaseerd op programma documentatie beschikbaar op meerdere UvA websites.",
+        "rating_system_title": "Beoordelingssysteem",
+        "rating_system_description": "Na elke reactie kun je de chatbot beoordelen op twee aspecten:",
+        "helpfulness_label": "🌟 **Nuttigheid**: Hoe nuttig was het antwoord? (1-5 sterren)",
+        "expectations_label": "🎯 **Verwachtingen**: Kwam het antwoord overeen met je verwachtingen? (1-5 sterren)",
+        "rating_help_text": "Je beoordelingen helpen ons de chatbot te verbeteren!",
+        "feedback_title": "Algemene Feedback",
+        "feedback_description": "Als je aanvullende feedback of suggesties voor verbetering hebt, laat het ons weten!",
+        "feedback_placeholder": "Je feedback",
+        "submit_feedback_button": "Feedback Versturen",
+        "feedback_success": "Feedback succesvol opgeslagen!",
+        "feedback_error": "Fout bij opslaan feedback:",
+        "feedback_warning": "Voer alsjeblieft feedback in voordat je verstuurt.",
+        "main_description": "Stel je vragen over het Informatica programma aan de UvA.",
+        "user_label": "Gebruiker",
+        "assistant_label": "Slimme Assistent",
+        "response_time": "Antwoord gegenereerd in",
+        "seconds": "seconden",
+        "rate_response": "📊 Beoordeel dit Antwoord",
+        "helpful_question": "🌟 **Hoe nuttig was dit antwoord?**",
+        "expectation_question": "🎯 **Kwam dit overeen met je verwachtingen?**",
+        "submit_rating_button": "Beoordeling Versturen",
+        "rating_success": "✅ Bedankt voor je beoordeling!",
+        "rating_error": "❌",
+        "rating_warning": "⚠️ Geef alsjeblieft zowel een nuttigheids- als verwachtingsbeoordeling voordat je verstuurt.",
+        "your_rating": "📊 **Je Beoordeling:**",
+        "helpfulness_rating": "🌟 Nuttigheid:",
+        "expectation_rating": "🎯 Verwachtingen:",
+        "chat_placeholder": "Stel je vraag over het Informatica programma...",
+        "generating_answer": "Antwoord genereren...",
+        "language_toggle": "Language / Taal"
+    }
+}
+
 class ChatMessage(TypedDict):
     role: Literal['user', 'model']
     timestamp: str
     content: str
+
+def get_text(key: str, lang: str) -> str:
+    """Get translated text for given key and language"""
+    return TRANSLATIONS[lang].get(key, TRANSLATIONS["en"].get(key, key))
 
 def save_rating_to_supabase(supabase: Client, timestamp, user_msg, assistant_msg, helpfulness, expectation, response_time):
     """Save rating to Supabase database"""
@@ -61,45 +143,46 @@ async def main():
     # Initialize Supabase client
     supabase = init_supabase()
 
+    # Language selection in sidebar
     with st.sidebar:
-        st.title("Informatica Program at UvA")
-        st.write(
-            "This is a chatbot that can help you with questions about the Informatica program at the University of Amsterdam. "
-            "Feel free to ask your questions and receive answers based on the available documentation."
+        st.markdown("### 🌐 " + TRANSLATIONS["en"]["language_toggle"])
+        language = st.selectbox(
+            "Choose language / Kies taal:",
+            options=["en", "nl"],
+            format_func=lambda x: "🇬🇧 English" if x == "en" else "🇳🇱 Nederlands",
+            index=1  # Default to Dutch
         )
+        
+        st.markdown("---")
+        
+        st.title(get_text("sidebar_title", language))
+        st.write(get_text("sidebar_description", language))
 
-        with st.expander("About this chatbot"):
-            st.write(
-                "This chatbot was developed for the UvA Informatica program and uses "
-                "RAG technology to answer questions based on program documentation available on multiple UvA websites."
-            )
+        with st.expander(get_text("about_title", language)):
+            st.write(get_text("about_description", language))
 
-        with st.expander("Rating System"):
-            st.write(
-                "After each response, you can rate the chatbot on two aspects:"
-            )
-            st.write("🌟 **Helpfulness**: How helpful was the response? (1-5 stars)")
-            st.write("🎯 **Expectations**: Did the response meet your expectations? (1-5 stars)")
-            st.write("Your ratings help us improve the chatbot!")
+        with st.expander(get_text("rating_system_title", language)):
+            st.write(get_text("rating_system_description", language))
+            st.write(get_text("helpfulness_label", language))
+            st.write(get_text("expectations_label", language))
+            st.write(get_text("rating_help_text", language))
 
-        with st.expander("General Feedback"):
-            st.write(
-                "If you have any additional feedback or suggestions for improvement, please let us know!"
-            )
-            feedback = st.text_area("Your feedback", "")
-            if st.button("Submit Feedback"):
+        with st.expander(get_text("feedback_title", language)):
+            st.write(get_text("feedback_description", language))
+            feedback = st.text_area(get_text("feedback_placeholder", language), "")
+            if st.button(get_text("submit_feedback_button", language)):
                 if feedback.strip():
                     success, message = save_feedback_to_supabase(supabase, feedback.strip())
                     if success:
-                        st.success(message)
+                        st.success(get_text("feedback_success", language))
                     else:
-                        st.error(message)
+                        st.error(f"{get_text('feedback_error', language)} {message}")
                 else:
-                    st.warning("Please enter some feedback before submitting.")
+                    st.warning(get_text("feedback_warning", language))
 
     # Set up Streamlit UI
-    st.title("UvA Informatica Chatbot")
-    st.write("Ask your questions about the Informatica program at UvA.")
+    st.title(get_text("title", language))
+    st.write(get_text("main_description", language))
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -112,14 +195,14 @@ async def main():
     for i, msg in enumerate(st.session_state.messages):
         if msg["role"] == "user":
             with st.chat_message("user"):
-                st.markdown(f"**User**\n\n{msg['content']}")
+                st.markdown(f"**{get_text('user_label', language)}**\n\n{msg['content']}")
         else:
             with st.chat_message("assistant"):
-                st.markdown(f"**Smart Assistant**\n\n{msg['content']}")
+                st.markdown(f"**{get_text('assistant_label', language)}**\n\n{msg['content']}")
 
                 # Show response time if available
                 if 'response_time' in msg:
-                    st.caption(f"⏱️ Response generated in {msg['response_time']} seconds")
+                    st.caption(f"⏱️ {get_text('response_time', language)} {msg['response_time']} {get_text('seconds', language)}")
 
                 # Create unique keys for each rating type
                 helpfulness_key = f"helpfulness_{i}"
@@ -129,12 +212,12 @@ async def main():
                 # Check if this message already has ratings
                 if rating_submitted_key not in st.session_state.ratings:
                     st.markdown("---")
-                    st.subheader("📊 Rate this Response")
+                    st.subheader(get_text("rate_response", language))
 
                     col1, col2 = st.columns(2)
 
                     with col1:
-                        st.markdown("🌟 **How helpful was this answer?**")
+                        st.markdown(get_text("helpful_question", language))
                         helpfulness_rating = st.radio(
                             "Helpfulness (1-5 stars)",
                             options=[1, 2, 3, 4, 5],
@@ -147,7 +230,7 @@ async def main():
                             st.markdown("⭐" * helpfulness_rating)
 
                     with col2:
-                        st.markdown("🎯 **Did this meet your expectations?**")
+                        st.markdown(get_text("expectation_question", language))
                         expectation_rating = st.radio(
                             "Expectations (1-5 stars)",
                             options=[1, 2, 3, 4, 5],
@@ -160,7 +243,7 @@ async def main():
                             st.markdown("⭐" * expectation_rating)
 
                     # Submit button for ratings
-                    if st.button(f"Submit Rating", key=f"submit_{i}"):
+                    if st.button(get_text("submit_rating_button", language), key=f"submit_{i}"):
                         if helpfulness_rating and expectation_rating:
                             # Store the ratings in session state
                             st.session_state.ratings[helpfulness_key] = helpfulness_rating
@@ -183,31 +266,30 @@ async def main():
                             )
 
                             if success:
-                                st.success("✅ Thank you for your rating!")
+                                st.success(get_text("rating_success", language))
                             else:
-                                st.error(f"❌ {message}")
-                                # Still mark as submitted to prevent repeated attempts
+                                st.error(f"{get_text('rating_error', language)} {message}")
 
                             st.rerun()
                         else:
-                            st.error("⚠️ Please provide both helpfulness and expectation ratings before submitting.")
+                            st.error(get_text("rating_warning", language))
                 else:
                     # Show the existing ratings
                     helpfulness = st.session_state.ratings.get(helpfulness_key, 0)
                     expectation = st.session_state.ratings.get(expectation_key, 0)
 
                     st.markdown("---")
-                    st.markdown("📊 **Your Rating:**")
+                    st.markdown(get_text("your_rating", language))
                     col1, col2 = st.columns(2)
 
                     with col1:
-                        st.info(f"🌟 Helpfulness: {helpfulness}/5 {'⭐' * helpfulness}")
+                        st.info(f"{get_text('helpfulness_rating', language)} {helpfulness}/5 {'⭐' * helpfulness}")
 
                     with col2:
-                        st.info(f"🎯 Expectations: {expectation}/5 {'⭐' * expectation}")
+                        st.info(f"{get_text('expectation_rating', language)} {expectation}/5 {'⭐' * expectation}")
 
     # Chat input for the user
-    user_input = st.chat_input("Ask your question about the Informatica program...")
+    user_input = st.chat_input(get_text("chat_placeholder", language))
 
     if user_input:
         # Add user message to session state
@@ -221,10 +303,10 @@ async def main():
 
         # Display the user message
         with st.chat_message("user"):
-            st.markdown(f"**User**\n\n{user_input}")
+            st.markdown(f"**{get_text('user_label', language)}**\n\n{user_input}")
 
         # Show a spinner while getting the response
-        with st.spinner("Generating answer..."):
+        with st.spinner(get_text("generating_answer", language)):
             start_time = time.time()  # Start timing
 
             # Process query using RAG system
