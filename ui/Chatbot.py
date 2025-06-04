@@ -46,7 +46,8 @@ def save_rating_to_supabase(supabase: Client, timestamp, user_msg, assistant_msg
 
 async def render_regular_chat(language, supabase):
     """Render the regular chat interface"""
-    st.write(get_text("main_description", language))
+    st.title(get_text("main_description", language))
+    st.write(get_text("main_description_detail", language))
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
