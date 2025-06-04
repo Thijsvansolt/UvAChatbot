@@ -82,7 +82,7 @@ async def get_title_and_summary(chunk: str, url: str) -> Dict[str, str]:
 
     try:
         response = await openai_client.chat.completions.create(
-            model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
+            model=os.getenv("LLM_MODEL", "gpt-3.5-turbo"),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"URL: {url}\n\nContent:\n{chunk[:1000]}..."}  # Send first 1000 chars for context
@@ -116,7 +116,7 @@ async def process_chunk(chunk: str, chunk_number: int, url: str) -> ProcessedChu
 
     # Create metadata
     metadata = {
-        "source": "LinkedIn",
+        "source": "Datanose",
         "chunk_size": len(chunk),
         "crawled_at": datetime.now(timezone.utc).isoformat(),
         "url_path": urlparse(url).path
@@ -174,47 +174,57 @@ async def process_and_store_document(url: str, markdown: str):
 
 async def crawl_parallel(urls: List[str], max_concurrent: int = 5):
     prune_filter = PruningContentFilter(
-        # Lower → more content retained, higher → more content pruned
         threshold=0.45,
-        # "fixed" or "dynamic"
         threshold_type="dynamic",
-        # Ignore nodes with <5 words
         min_word_threshold=5
     )
 
     md_generator = DefaultMarkdownGenerator(content_filter=prune_filter)
 
-    """Crawl multiple URLs in parallel with a concurrency limit."""
+    # Configure browser
     browser_config = BrowserConfig(
-        headless=True,
-        verbose=False,
-        extra_args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"],
+        headless=False,  # Zet dit op False om interactief te debuggen
+        verbose=True,
+        extra_args=[
+            "--disable-gpu",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ],
+        viewport={"width": 1280, "height": 800}
     )
-    crawl_config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS, markdown_generator=md_generator)
 
-    # Create the crawler instance
+    crawl_config = CrawlerRunConfig(
+        cache_mode=CacheMode.BYPASS,
+        markdown_generator=md_generator,
+        wait_until="networkidle"  # Wacht tot alle netwerkactiviteit stopt
+    )
+
     crawler = AsyncWebCrawler(config=browser_config)
     await crawler.start()
 
     try:
-        # Create a semaphore to limit concurrency
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def process_url(url: str):
+        async def process_url(url: str, index: int):
             async with semaphore:
-                result = await crawler.arun(
-                    url=url,
-                    config=crawl_config,
-                    session_id="session1"
-                )
-                if result.success:
-                    print(f"Successfully crawled: {url}")
-                    await process_and_store_document(url, result.markdown.fit_markdown)
-                else:
-                    print(f"Failed: {url} - Error: {result.error_message}")
+                session_id = f"session_{index}_{int(datetime.now().timestamp())}"
+                try:
+                    result = await crawler.arun(
+                        url=url,
+                        config=crawl_config,
+                        session_id=session_id
+                    )
+                    if result.success:
+                        print(f"✅ Success: {url}")
+                        await process_and_store_document(url, result.markdown.fit_markdown)
+                    else:
+                        print(f"❌ Failed: {url}\nReason: {result.error_message}")
+                except Exception as e:
+                    print(f"❗ Exception for {url}: {str(e)}")
 
-        # Process all URLs in parallel with limited concurrency
-        await asyncio.gather(*[process_url(url) for url in urls])
+        await asyncio.gather(*[process_url(url, i) for i, url in enumerate(urls)])
     finally:
         await crawler.close()
 
@@ -226,7 +236,7 @@ def get_urls(file_path: str) -> List[str]:
 
 async def main():
     # Get URLs from Pydantic AI docs
-    urls = get_urls("")
+    urls = get_urls("urls_to_crawl.txt")
     if not urls:
         print("No URLs found to crawl")
         return

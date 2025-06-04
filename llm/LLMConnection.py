@@ -1,12 +1,12 @@
 from openai import AsyncOpenAI
-from supabase import create_client, Client
 import asyncio
 from typing import List
-from langdetect import detect
 import logging
 import sys
 
 import streamlit as st
+from langdetect import detect
+from supabase import create_client, Client
 
 # Configure logging
 logging.basicConfig(
@@ -39,9 +39,9 @@ def init_openai():
 
 openai_client = init_openai()
 
-async def get_completion(prompt, question, context):
+async def get_completion(prompt, question, context, name_model="gpt-3.5-turbo"):
     completion = await openai_client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model=name_model,
         messages=[
             {"role": "system", "content": prompt},
             {"role": "user", "content": context},
@@ -51,7 +51,7 @@ async def get_completion(prompt, question, context):
     return completion.choices[0].message.content
 
 
-async def translate_final_response(prompt, question, context, response_language='dutch'):
+async def translate_final_response(prompt, question, context, response_language='dutch', name_model="gpt-3.5-turbo"):
     if response_language == 'dutch' or response_language == 'nl':
         language_prompt = f"{prompt}\n\nIBelangrijk reageer alleen in het nederlands."
     else:
@@ -59,7 +59,7 @@ async def translate_final_response(prompt, question, context, response_language=
 
     corrected_prompt = language_prompt + f"\n\n{context}"
     completion = await openai_client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model=name_model,
         messages=[
             {"role": "system", "content": corrected_prompt},
             {"role": "user", "content": context},
@@ -100,9 +100,9 @@ async def detect_language(text: str) -> str:
         }
         return lang_mapping.get(detected_lang, 'dutch')
     except Exception as e:
-        logger.warning(f"Language detection failed: {e}, defaulting to Dutch")
-        # Fallback: assume Dutch if detection fails
-        return 'dutch'
+        logger.warning(f"Language detection failed: {e}, defaulting to English")
+        # Fallback: assume English if detection fails
+        return 'English'
 
 async def translate_query_to_dutch(query: str) -> str:
     """
@@ -201,9 +201,9 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
             'match_uva_pages',
                 {
                 'query_embedding': query_embedding,
-                'match_count': 10,
+                'match_count': 7,
                 'filter': {},
-                'similarity_threshold': 0.35  # Adjust this value based on testing
+                'similarity_threshold': 0.4  # Adjust this value based on testing
                 }
             ).execute()
 
@@ -248,7 +248,7 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
         logger.error(f"Error retrieving documentation: {e}")
         return f"Error retrieving documentation: {str(e)}"
 
-async def process_query(user_prompt, chat_history=None):
+async def process_query(user_prompt, chat_history=None, model="gpt-3.5-turbo"):
     """
     Process user query with multilingual support.
     """
@@ -263,7 +263,7 @@ async def process_query(user_prompt, chat_history=None):
 
     # Format chat history
     # take the last 5 messages for context if available
-    chat_history = chat_history[-7:] if len(chat_history) > 5 else chat_history
+    chat_history = chat_history[-5:] if len(chat_history) > 5 else chat_history
     logger.debug(f"Using {len(chat_history)} messages from chat history")
 
     # Format chat history for the prompt
@@ -284,7 +284,8 @@ async def process_query(user_prompt, chat_history=None):
         Master_prompt,
         user_prompt,
         context,
-        response_language=original_language
+        response_language=original_language,
+        name_model=model
     )
 
     logger.info("Successfully generated response")
