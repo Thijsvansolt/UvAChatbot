@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from typing import List, Dict, Any
 from dataclasses import dataclass
 from dotenv import load_dotenv, find_dotenv
+from pathlib import Path
 
 from openai import AsyncOpenAI
 from supabase import create_client, Client
@@ -142,5 +143,18 @@ async def process_pdf_file(pdf_path: str, url_id: str = "local-pdf"):
     insert_tasks = [insert_chunk(chunk) for chunk in processed_chunks]
     await asyncio.gather(*insert_tasks)
 
+# New logic to loop through all PDFs
+async def process_all_pdfs():
+    pdf_dir = Path(__file__).parent.parent / "pdfs"  # go up from utils/ to the root, then into pdfs/
+    pdf_files = list(pdf_dir.glob("*.pdf"))
+
+    if not pdf_files:
+        print("No PDF files found.")
+        return
+
+    for pdf_file in pdf_files:
+        url_id = pdf_file.stem  # e.g., "Coursemanual5062KLCR6Y"
+        await process_pdf_file(str(pdf_file), url_id=url_id)
+
 if __name__ == "__main__":
-    asyncio.run(process_pdf_file("pdfs/Coursemanual5062KLCR6Y.pdf", url_id="klassieke_crypto_pdf"))
+    asyncio.run(process_all_pdfs())

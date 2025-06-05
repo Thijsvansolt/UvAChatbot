@@ -3,8 +3,10 @@ import random
 import time
 import logging
 import sys
+import asyncio
 import streamlit as st
 from supabase import Client
+
 
 from ui.multilanguage import TRANSLATIONS
 from llm.LLMConnection import process_query
@@ -181,26 +183,63 @@ async def render_regular_chat(language, supabase):
         with st.chat_message("user"):
             st.markdown(f"**{get_text('user_label', language)}**\n\n{user_input}")
 
-        # Show a spinner while getting the response
-        with st.spinner(get_text("generating_answer", language)):
-            start_time = time.time()  # Start timing
-            logger.info("Starting query processing")
+        # Streaming response
+        with st.chat_message("assistant"):
+            st.markdown(f"**{get_text('assistant_label', language)}**")
 
-            # Process query using RAG system with GPT-3.5 Turbo
-            response = await process_query(user_input, st.session_state.messages, "gpt-3.5-turbo")
+            # Create a placeholder for the streaming response
+            response_placeholder = st.empty()
+            full_response = ""
 
-            end_time = time.time()  # End timing
-            elapsed_time = round(end_time - start_time, 2)  # In seconds
-            logger.info(f"Query processed successfully in {elapsed_time} seconds")
+            start_time = time.time()
+            logger.info("Starting streaming query processing")
 
-            st.session_state.messages.append(
-                {
-                    "role": "assistant",
-                    "timestamp": datetime.datetime.now().isoformat(),
-                    "content": response,
-                    "response_time": elapsed_time  # Store response time in message
-                }
-            )
+            try:
+                # Get the streaming response generator
+                stream_generator = await process_query(
+                    user_input,
+                    st.session_state.messages,
+                    "gpt-3.5-turbo",
+                    streaming=True
+                )
+
+                nr_chunks = 0
+                # Stream the response chunk by chunk
+                async for chunk in stream_generator:
+                    full_response += chunk
+                    nr_chunks += 1
+                    # Update the placeholder with current response + cursor
+                    response_placeholder.markdown(full_response + "▌")
+                    await asyncio.sleep(0.05)
+
+                # Remove cursor when done
+                response_placeholder.markdown(full_response)
+
+                end_time = time.time()
+                elapsed_time = round(end_time - start_time, 2)
+                logger.info(f"Streaming query processed successfully in {elapsed_time} seconds")
+
+                # Get response time without sleep
+                elapsed_time = elapsed_time - (nr_chunks * 0.05)
+                elapsed_time = round(elapsed_time, 2)
+
+                # Show response time
+                st.caption(f"⏱️ {get_text('response_time', language)} {elapsed_time} {get_text('seconds', language)}")
+
+                # Add assistant message to session state
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "timestamp": datetime.datetime.now().isoformat(),
+                        "content": full_response,
+                        "response_time": elapsed_time
+                    }
+                )
+
+            except Exception as e:
+                logger.error(f"Error during streaming: {e}")
+                st.error(f"{get_text('error_occurred', language)} {str(e)}")
+
 
         # Rerun to display the new message with rating option
         st.rerun()

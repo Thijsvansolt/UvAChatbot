@@ -101,7 +101,7 @@ TRANSLATIONS = {
         # A/B Testing translations
         "ab_test_title": "🧪 A/B Testing - Model Vergelijking",
         "ab_test_description": "Vergelijk reacties van twee verschillende AI-modellen en help ons begrijpen welke beter presteert!",
-        "ab_test_instructions": "Voer hieronder een vraag in en je ontvangt reacties van twee verschillende modellen. Kies welke reactie je verkiest.",
+        "ab_test_instructions": "Voer hieronder een vraag in en je ontvangt reacties van twee verschillende modellen. Kies welke reactie je beter vindt.",
         "model_a_label": "Model A Reactie",
         "model_b_label": "Model B Reactie",
         "which_better": "Welke reactie verkies je?",

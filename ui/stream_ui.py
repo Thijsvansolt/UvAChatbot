@@ -130,7 +130,6 @@ async def main():
                     st.warning(get_text("feedback_warning", language))
                     logger.warning("User tried to submit empty feedback")
 
-    
 
 
 if __name__ == "__main__":

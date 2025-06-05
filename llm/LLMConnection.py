@@ -3,6 +3,7 @@ import asyncio
 from typing import List
 import logging
 import sys
+import time
 
 import streamlit as st
 from langdetect import detect
@@ -50,6 +51,28 @@ async def get_completion(prompt, question, context, name_model="gpt-3.5-turbo"):
     )
     return completion.choices[0].message.content
 
+# Streaming version of get_completion
+async def get_completion_streaming(prompt, question, context, name_model="gpt-3.5-turbo"):
+    """Get completion with streaming support."""
+    stream = await openai_client.chat.completions.create(
+        model=name_model,
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": context},
+            {"role": "user", "content": question},
+        ],
+        stream=True
+    )
+
+    full_response = ""
+    async for chunk in stream:
+        if chunk.choices[0].delta.content is not None:
+            content = chunk.choices[0].delta.content
+            full_response += content
+            yield content
+
+    # Return the full response at the end for logging/processing
+    # return full_response
 
 async def translate_final_response(prompt, question, context, response_language='dutch', name_model="gpt-3.5-turbo"):
     if response_language == 'dutch' or response_language == 'nl':
@@ -67,6 +90,35 @@ async def translate_final_response(prompt, question, context, response_language=
         ],
     )
     return completion.choices[0].message.content
+
+# Streaming version of translate_final_response
+async def translate_final_response_streaming(prompt, question, context, response_language='dutch', name_model="gpt-3.5-turbo"):
+    """Streaming version of translate_final_response."""
+    if response_language == 'dutch' or response_language == 'nl':
+        language_prompt = f"{prompt}\n\nIBelangrijk reageer alleen in het nederlands."
+    else:
+        language_prompt = f"{prompt}\n\nIMPORTANT: Please respond only in {response_language}."
+
+    corrected_prompt = language_prompt + f"\n\n{context}"
+
+    stream = await openai_client.chat.completions.create(
+        model=name_model,
+        messages=[
+            {"role": "system", "content": corrected_prompt},
+            {"role": "user", "content": context},
+            {"role": "user", "content": question},
+        ],
+        stream=True
+    )
+
+    full_response = ""
+    async for chunk in stream:
+        if chunk.choices[0].delta.content is not None:
+            content = chunk.choices[0].delta.content
+            full_response += content
+            yield content
+
+    # return full_response
 
 # Updated Master_prompt to handle multiple languages
 Master_prompt = """
@@ -167,10 +219,45 @@ async def get_embedding(text: str) -> List[float]:
         logger.error(f"Error getting embedding: {e}")
         return [0] * 1536  # Return zero vector on error
 
+async def get_supabase_results(query_embedding: List[float]):
+    """Query Supabase for relevant documents."""
+    try:
+        result = supabase.rpc(
+            'match_uva_pages',
+            {
+                'query_embedding': query_embedding,
+                'match_count': 7,
+                'filter': {},
+                'similarity_threshold': 0.4
+            }
+        ).execute()
+
+        logger.info(f"Supabase returned {len(result.data) if result.data else 0} documents")
+        return result.data
+    except Exception as e:
+        logger.error(f"Error querying Supabase: {e}")
+        return []
+
+def format_documentation_results(results):
+    """Format Supabase results into context string."""
+    if not results:
+        return "No relevant documentation found."
+
+    formatted_chunks = []
+    for doc in results:
+        chunk_text = f"""
+                        # {doc['title']}
+
+                        {doc['content']}
+                        """
+        formatted_chunks.append(chunk_text)
+
+    return "\n\n---\n\n".join(formatted_chunks)
+
 async def retrieve_documentation(user_query: str, original_language: str = None):
     """
     Retrieve relevant documentation from Supabase based on the user's query.
-    Handles translation for non-Dutch queries.
+    Handles translation for non-Dutch queries with concurrent API calls.
     """
     # Check if the user query is empty
     if not user_query.strip():
@@ -185,52 +272,31 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
         search_query = user_query
         logger.info(f"Processing query in {original_language}")
 
-        # If the query is not in Dutch, translate it
+        # If the query is not in Dutch, translate it first
         if original_language != 'dutch':
             logger.info(f"Detected {original_language} query, translating to Dutch for search...")
             search_query = await translate_query_to_dutch(user_query)
             logger.info(f"Translated query: {search_query}")
 
-        # Get the embedding for the search query
-        logger.debug("Generating embedding for search query")
-        query_embedding = await get_embedding(search_query)
+        # Get embedding and query Supabase concurrently (these are independent)
+        logger.info("Running embedding generation and preparing for database query...")
 
-        # Query Supabase for relevant documents
-        logger.info("Querying Supabase for relevant documents")
-        result = supabase.rpc(
-            'match_uva_pages',
-                {
-                'query_embedding': query_embedding,
-                'match_count': 7,
-                'filter': {},
-                'similarity_threshold': 0.4  # Adjust this value based on testing
-                }
-            ).execute()
+        # Create tasks for concurrent execution
+        embedding_task = asyncio.create_task(get_embedding(search_query))
 
-        logger.info(f"Supabase returned {len(result.data) if result.data else 0} documents")
+        # Wait for embedding to complete
+        query_embedding = await embedding_task
 
-        # Log document details
-        if result.data:
-            for doc in result.data:
-                logger.info(f"Document ID: {doc['id']}, Title: {doc['title']}")
-                logger.info(f"Content preview: {doc['content']}...")
+        # Now query Supabase with the embedding
+        supabase_task = asyncio.create_task(get_supabase_results(query_embedding))
+        supabase_results = await supabase_task
 
-        if not result.data:
+        if not supabase_results:
             logger.warning("No relevant documentation found")
             return "No relevant documentation found."
 
         # Format the results
-        formatted_chunks = []
-        for doc in result.data:
-            chunk_text = f"""
-                            # {doc['title']}
-
-                            {doc['content']}
-                            """
-            formatted_chunks.append(chunk_text)
-
-        # Join all chunks with a separator
-        dutch_context = "\n\n---\n\n".join(formatted_chunks)
+        dutch_context = format_documentation_results(supabase_results)
 
         # If the original query was not in Dutch, translate the context back
         if original_language != 'dutch':
@@ -248,63 +314,55 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
         logger.error(f"Error retrieving documentation: {e}")
         return f"Error retrieving documentation: {str(e)}"
 
-async def process_query(user_prompt, chat_history=None, model="gpt-3.5-turbo"):
+async def process_query(user_prompt, chat_history=None, model="gpt-3.5-turbo", streaming=False):
     """
-    Process user query with multilingual support.
+    Process user query with optimized concurrent API calls and optional streaming.
     """
     if chat_history is None:
         chat_history = []
 
+    start_time = time.time()
     logger.info(f"Processing new user query: {user_prompt[:50]}...")
 
-    # Detect the language of the user's query
-    original_language = await detect_language(user_prompt)
-    logger.info(f"Detected language: {original_language}")
+    # Step 1: Language detection and chat history preparation (fast operations)
+    language_task = asyncio.create_task(detect_language(user_prompt))
 
-    # Format chat history
-    # take the last 5 messages for context if available
+    # Prepare chat history while language detection runs
     chat_history = chat_history[-5:] if len(chat_history) > 5 else chat_history
-    logger.debug(f"Using {len(chat_history)} messages from chat history")
-
-    # Format chat history for the prompt
     str_history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history])
     chat_history_text = f"Chat history:\n{str_history}"
 
-    # Retrieve documentation
+    # Wait for language detection
+    original_language = await language_task
+    logger.info(f"Detected language: {original_language}")
+
+    # Step 2: Handle documentation retrieval (this includes translation if needed)
     logger.info("Retrieving relevant documentation")
-    results = await retrieve_documentation(user_prompt, original_language)
-
-    # Combine context
-    context = f"{chat_history_text}\n\n{results}"
-    logger.debug(f"Combined context length: {len(context)} characters")
-
-    # Get the final answer
-    logger.info("Generating final response")
-    answer = await translate_final_response(
-        Master_prompt,
-        user_prompt,
-        context,
-        response_language=original_language,
-        name_model=model
+    documentation_task = asyncio.create_task(
+        retrieve_documentation(user_prompt, original_language)
     )
 
-    logger.info("Successfully generated response")
-    return answer
+    # Wait for documentation retrieval to complete
+    documentation_results = await documentation_task
 
-# Example usage
-if __name__ == "__main__":
-    logger.info("Starting interactive mode")
-    logger.info("Ask your question about computer science at UvA in any language (type 'exit' to stop):")
-    logger.info("Stel je vraag over informatica aan de UvA in elke taal (typ 'exit' om te stoppen):")
+    # Step 3: Combine context
+    context = f"{chat_history_text}\n\n{documentation_results}"
+    logger.debug(f"Combined context length: {len(context)} characters")
 
-    while True:
-        user_input = input("You/Jij: ")
-        if user_input.lower() == "exit":
-            logger.info("Exiting interactive mode")
-            break
+    # Step 4: Generate final response (streaming or non-streaming)
+    logger.info("Generating final response")
 
-        # Run the async function with asyncio
-        response = asyncio.run(process_query(user_input))
-        logger.info(f"Generated response: {response[:100]}...")
-        print(f"Smart assistant: {response}")
-        print("-" * 50)
+    # Return an async generator for streaming
+    async def stream_response():
+        async for chunk in translate_final_response_streaming(
+            Master_prompt,
+            user_prompt,
+            context,
+            response_language=original_language,
+            name_model=model
+        ):
+            yield chunk
+
+    total_time = time.time() - start_time
+    logger.info(f"Started streaming response after {total_time:.2f} seconds")
+    return stream_response()

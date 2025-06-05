@@ -3,6 +3,7 @@ import random
 import time
 import logging
 import sys
+import asyncio
 import streamlit as st
 from supabase import Client
 
@@ -48,12 +49,12 @@ def save_ab_comparison_to_supabase(supabase: Client, timestamp, user_question, g
 # You'll need to implement these functions in your LLMConnection.py or create them
 async def process_query_model_a(query, chat_history):
     """Process query using GPT-3.5-turbo"""
-    response = await process_query(query, chat_history, "gpt-3.5-turbo")
+    response = await process_query(query, chat_history, "gpt-3.5-turbo", streaming=True)
     return response  # Remove the [Model A] prefix
 
 async def process_query_model_b(query, chat_history):
     """Process query using O4-mini"""
-    response = await process_query(query, chat_history, "o4-mini")
+    response = await process_query(query, chat_history, "o4-mini", streaming=True)
     return response  # Remove the [Model B] prefix
 
 
@@ -116,9 +117,6 @@ async def render_ab_testing(language, supabase):
             st.divider()
 
 
-    # with st.container():
-
-        # Use chat_input for a more chat-like experience
     user_input = st.chat_input(
         placeholder=get_text("ab_placeholder", language) if "ab_placeholder" in TRANSLATIONS[language] else "Type your message to compare models...",
         key="ab_chat_input"
@@ -127,57 +125,71 @@ async def render_ab_testing(language, supabase):
     if user_input:
         logger.info(f"Starting A/B test for query: {user_input[:50]}...")
 
+        # Setup chat interface
+        st.chat_message("user").markdown(f"**You**\n\n{user_input}")
+        msg_a = st.chat_message("assistant")
+        msg_b = st.chat_message("assistant")
+
         with st.spinner(get_text("generating_responses", language)):
-            # Generate responses from both models simultaneously
-            start_time_gpt35 = time.time()
-            gpt35_response = await process_query_model_a(user_input, [])
-            end_time_gpt35 = time.time()
-            gpt35_time = round(end_time_gpt35 - start_time_gpt35, 2)
 
-            start_time_o4mini = time.time()
-            o4mini_response = await process_query_model_b(user_input, [])
-            end_time_o4mini = time.time()
-            o4mini_time = round(end_time_o4mini - start_time_o4mini, 2)
+            # Randomize label assignment
+            a_is_gpt = random.choice([True, False])
+            label_a, label_b = "Model A", "Model B"
+            model_a_name = "gpt-3.5-turbo" if a_is_gpt else "o4-mini"
+            model_b_name = "o4-mini" if a_is_gpt else "gpt-3.5-turbo"
 
-            logger.info(f"A/B responses generated - GPT-3.5: {gpt35_time}s, O4-mini: {o4mini_time}s")
+            msg_a.markdown(f"**{label_a}**")
+            msg_b.markdown(f"**{label_b}**")
 
-            # Randomly assign which model appears as A or B to avoid bias
-            gpt35_as_model_a = random.choice([True, False])
+            # Prepare placeholders
+            placeholder_a = msg_a.empty()
+            placeholder_b = msg_b.empty()
 
-            # Assign model responses and metadata based on random assignment
-            if gpt35_as_model_a:
-                model_a_response, model_b_response = gpt35_response, o4mini_response
-                model_a_time, model_b_time = gpt35_time, o4mini_time
-                actual_model_a, actual_model_b = 'gpt-3.5-turbo', 'o4-mini'
-                gpt35_was_model_a = True
-            else:
-                model_a_response, model_b_response = o4mini_response, gpt35_response
-                model_a_time, model_b_time = o4mini_time, gpt35_time
-                actual_model_a, actual_model_b = 'o4-mini', 'gpt-3.5-turbo'
-                gpt35_was_model_a = False
+            async def stream_to_placeholder(stream_coro, placeholder):
+                full = ""
+                nr_chunks = 0
+                start_time = time.time()
+                async for chunk in await stream_coro:
+                    full += chunk
+                    nr_chunks += 1
+                    placeholder.markdown(full + "▌")
+                    await asyncio.sleep(0.05)
+                placeholder.markdown(full)
+                elapsed = round(time.time() - start_time - nr_chunks * 0.05, 2)
+                return full, nr_chunks, elapsed
+
+            # Start both stream coroutines
+            task_a = asyncio.create_task(stream_to_placeholder(process_query_model_a(user_input, []), placeholder_a))
+            task_b = asyncio.create_task(stream_to_placeholder(process_query_model_b(user_input, []), placeholder_b))
+
+            # Wait for both to finish
+            result_a, result_b = await asyncio.gather(task_a, task_b)
+
+            response_a, nr_chunks_a, time_a = result_a
+            response_b, nr_chunks_b, time_b = result_b
 
             comparison_data = {
                 'question': user_input,
-                'model_a_response': model_a_response,
-                'model_b_response': model_b_response,
-                'model_a_time': model_a_time,
-                'model_b_time': model_b_time,
-                'model_a_name': 'Model A',
-                'model_b_name': 'Model B',
-                # Efficient tracking
-                'gpt35_response': gpt35_response,
-                'o4mini_response': o4mini_response,
-                'gpt35_time': gpt35_time,
-                'o4mini_time': o4mini_time,
-                'gpt35_was_model_a': gpt35_was_model_a,
-                'actual_model_a': actual_model_a,
-                'actual_model_b': actual_model_b
+                'model_a_response': response_a,
+                'model_b_response': response_b,
+                'model_a_time': time_a,
+                'model_b_time': time_b,
+                'model_a_name': label_a,
+                'model_b_name': label_b,
+                'gpt35_response': response_a if a_is_gpt else response_b,
+                'o4mini_response': response_b if a_is_gpt else response_a,
+                'gpt35_time': time_a if a_is_gpt else time_b,
+                'o4mini_time': time_b if a_is_gpt else time_a,
+                'gpt35_was_model_a': a_is_gpt,
+                'actual_model_a': model_a_name,
+                'actual_model_b': model_b_name
             }
 
-            # Add to session state
             st.session_state.ab_comparisons.append(comparison_data)
 
         st.rerun()
+
+
 
 async def handle_comparison_choice(supabase, comparison_index, preference, comparison, language):
     """Handle user's comparison choice and save to database"""
