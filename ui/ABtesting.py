@@ -46,16 +46,24 @@ def save_ab_comparison_to_supabase(supabase: Client, timestamp, user_question, g
         logger.error(f"Error saving A/B comparison to database: {str(e)}")
         return False, f"Error saving comparison: {str(e)}"
 
-# You'll need to implement these functions in your LLMConnection.py or create them
 async def process_query_model_a(query, chat_history):
     """Process query using GPT-3.5-turbo"""
-    response = await process_query(query, chat_history, "gpt-3.5-turbo", streaming=True)
-    return response  # Remove the [Model A] prefix
+    response, time_taken = await process_query(query, chat_history, "gpt-3.5-turbo", streaming=True)
+    return response, time_taken
 
 async def process_query_model_b(query, chat_history):
     """Process query using O4-mini"""
-    response = await process_query(query, chat_history, "o4-mini", streaming=True)
-    return response  # Remove the [Model B] prefix
+    response, time_taken = await process_query(query, chat_history, "o4-mini", streaming=True)
+    return response, time_taken
+
+async def stream_to_placeholder(stream_coro, placeholder):
+    full = ""
+    async for chunk in stream_coro:
+        full += chunk
+        placeholder.markdown(full + "▌")
+        await asyncio.sleep(0.05)
+    placeholder.markdown(full)
+    return full
 
 
 async def render_ab_testing(language, supabase):
@@ -96,11 +104,11 @@ async def render_ab_testing(language, supabase):
             if f"ab_submitted_{i}" in st.session_state.ab_submitted:
                 preference = comparison.get('user_preference', 'Unknown')
                 if preference == "model_a":
-                    st.success("✅ You chose Model A")
+                    st.success(get_text("ab_chose_A", language))
                 elif preference == "model_b":
-                    st.success("✅ You chose Model B")
+                    st.success(get_text("ab_chose_B", language))
                 else:
-                    st.info("🤝 You marked them as Equal")
+                    st.info(get_text("ab_chose_equal", language))
             else:
                 st.markdown(f"#### {get_text('ab_comparisons', language)}")
                 col_a, col_b, col_equal = st.columns(3)
@@ -145,41 +153,39 @@ async def render_ab_testing(language, supabase):
             placeholder_a = msg_a.empty()
             placeholder_b = msg_b.empty()
 
-            async def stream_to_placeholder(stream_coro, placeholder):
-                full = ""
-                nr_chunks = 0
-                start_time = time.time()
-                async for chunk in await stream_coro:
-                    full += chunk
-                    nr_chunks += 1
-                    placeholder.markdown(full + "▌")
-                    await asyncio.sleep(0.05)
-                placeholder.markdown(full)
-                elapsed = round(time.time() - start_time - nr_chunks * 0.05, 2)
-                return full, nr_chunks, elapsed
+            chat_history = []
+            for comparison in st.session_state.ab_comparisons:
+                chat_history.append({"role": "user", "content": comparison["question"]})
+                # You could choose either model A or model B's response; for consistency, use the same one
+                chat_history.append({"role": "assistant", "content": comparison["model_a_response"]})
+
 
             # Start both stream coroutines
-            task_a = asyncio.create_task(stream_to_placeholder(process_query_model_a(user_input, []), placeholder_a))
-            task_b = asyncio.create_task(stream_to_placeholder(process_query_model_b(user_input, []), placeholder_b))
+            results = await asyncio.gather(
+                process_query_model_a(user_input, chat_history),
+                process_query_model_b(user_input, chat_history)
+            )
+            (model_a_response, time_taken_a), (model_b_response, time_taken_b) = results
+
+
+            task_a = asyncio.create_task(stream_to_placeholder(model_a_response, placeholder_a))
+            task_b = asyncio.create_task(stream_to_placeholder(model_b_response, placeholder_b))
 
             # Wait for both to finish
-            result_a, result_b = await asyncio.gather(task_a, task_b)
-
-            response_a, nr_chunks_a, time_a = result_a
-            response_b, nr_chunks_b, time_b = result_b
+            response_a, response_b = await asyncio.gather(task_a, task_b)
 
             comparison_data = {
                 'question': user_input,
                 'model_a_response': response_a,
                 'model_b_response': response_b,
-                'model_a_time': time_a,
-                'model_b_time': time_b,
+                'model_a_time': time_taken_a,
+                'model_b_time': time_taken_b,
                 'model_a_name': label_a,
                 'model_b_name': label_b,
                 'gpt35_response': response_a if a_is_gpt else response_b,
                 'o4mini_response': response_b if a_is_gpt else response_a,
-                'gpt35_time': time_a if a_is_gpt else time_b,
-                'o4mini_time': time_b if a_is_gpt else time_a,
+                'gpt35_time': time_taken_a if a_is_gpt else time_taken_b,
+                'o4mini_time': time_taken_b if a_is_gpt else time_taken_a,
                 'gpt35_was_model_a': a_is_gpt,
                 'actual_model_a': model_a_name,
                 'actual_model_b': model_b_name

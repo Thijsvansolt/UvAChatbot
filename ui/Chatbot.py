@@ -196,18 +196,16 @@ async def render_regular_chat(language, supabase):
 
             try:
                 # Get the streaming response generator
-                stream_generator = await process_query(
+                stream_generator, time_taken = await process_query(
                     user_input,
                     st.session_state.messages,
                     "gpt-3.5-turbo",
                     streaming=True
                 )
 
-                nr_chunks = 0
                 # Stream the response chunk by chunk
                 async for chunk in stream_generator:
                     full_response += chunk
-                    nr_chunks += 1
                     # Update the placeholder with current response + cursor
                     response_placeholder.markdown(full_response + "▌")
                     await asyncio.sleep(0.05)
@@ -219,12 +217,8 @@ async def render_regular_chat(language, supabase):
                 elapsed_time = round(end_time - start_time, 2)
                 logger.info(f"Streaming query processed successfully in {elapsed_time} seconds")
 
-                # Get response time without sleep
-                elapsed_time = elapsed_time - (nr_chunks * 0.05)
-                elapsed_time = round(elapsed_time, 2)
-
                 # Show response time
-                st.caption(f"⏱️ {get_text('response_time', language)} {elapsed_time} {get_text('seconds', language)}")
+                st.caption(f"⏱️ {get_text('response_time', language)} {time_taken} {get_text('seconds', language)}")
 
                 # Add assistant message to session state
                 st.session_state.messages.append(
@@ -232,7 +226,7 @@ async def render_regular_chat(language, supabase):
                         "role": "assistant",
                         "timestamp": datetime.datetime.now().isoformat(),
                         "content": full_response,
-                        "response_time": elapsed_time
+                        "response_time": time_taken
                     }
                 )
 

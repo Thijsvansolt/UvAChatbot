@@ -60,6 +60,9 @@ TRANSLATIONS = {
         "ab_user_label": "Your question",
         "ab_comparisons": "Which model's answer is better?",
         "ab_equal": "equally good",
+        "ab_chose_A": "✅ You chose Model A",
+        "ab_chose_B": "✅ You chose Model B",
+        "ab_chose_equal": "🤝 You marked them as Equal",
     },
     "nl": {
         "title": "UvA Informatica Chatbot",
@@ -121,5 +124,8 @@ TRANSLATIONS = {
         "ab_user_label": "Jouw vraag",
         "ab_comparisons": "Welk models antwoord is beter?",
         "ab_equal": "even goed",
+        "ab_chose_A": "✅ Je koos Model A",
+        "ab_chose_B": "✅ Je koos Model B",
+        "ab_chose_equal": "🤝 Je markeerde ze als Even Goed",
     }
 }

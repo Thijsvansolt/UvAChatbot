@@ -4,10 +4,12 @@ from typing import List
 import logging
 import sys
 import time
+import json
 
 import streamlit as st
 from langdetect import detect
 from supabase import create_client, Client
+from llm.QuestionDict import IntentClassifier
 
 # Configure logging
 logging.basicConfig(
@@ -143,18 +145,20 @@ async def detect_language(text: str) -> str:
     try:
         detected_lang = detect(text)
         # Map language codes to full names for clarity
+        logger.info(f"******************************Detected language: {detected_lang}")
         lang_mapping = {
             'en': 'english',
             'nl': 'dutch',
             'de': 'german',
             'fr': 'french',
-            'es': 'spanish'
+            'es': 'spanish',
+            'af': 'dutch',
         }
-        return lang_mapping.get(detected_lang, 'dutch')
+        return lang_mapping.get(detected_lang, 'english')
     except Exception as e:
         logger.warning(f"Language detection failed: {e}, defaulting to English")
         # Fallback: assume English if detection fails
-        return 'English'
+        return 'english'
 
 async def translate_query_to_dutch(query: str) -> str:
     """
@@ -220,22 +224,42 @@ async def get_embedding(text: str) -> List[float]:
         return [0] * 1536  # Return zero vector on error
 
 async def get_supabase_results(query_embedding: List[float]):
-    """Query Supabase for relevant documents."""
+    """Query Supabase for relevant documents by embedding similarity."""
     try:
         result = supabase.rpc(
-            'match_uva_pages',
+            'search_by_embedding',
             {
                 'query_embedding': query_embedding,
-                'match_count': 7,
-                'filter': {},
-                'similarity_threshold': 0.4
+                'match_count': 5,
+                'similarity_threshold': 0.45  # Adjust threshold as needed
             }
         ).execute()
 
         logger.info(f"Supabase returned {len(result.data) if result.data else 0} documents")
-        return result.data
+        for doc in result.data or []:
+            logger.info(f"Document: {doc['title']} - {doc['summary'][:50]}...")
+        return result.data or []
     except Exception as e:
         logger.error(f"Error querying Supabase: {e}")
+        return []
+
+
+async def get_supabase_results_with_filters(filters: dict):
+    """Query Supabase for relevant documents with URL filters only."""
+    try:
+        result = supabase.rpc(
+            'search_by_url_filter',
+            {
+                'filter': filters
+            }
+        ).execute()
+
+        logger.info(f"Supabase returned {len(result.data) if result.data else 0} documents with filters")
+        for doc in result.data or []:
+            logger.info(f"Document: {doc['title']} - {doc['summary'][:50]}...")
+        return result.data or []
+    except Exception as e:
+        logger.error(f"Error querying Supabase with filters: {e}")
         return []
 
 def format_documentation_results(results):
@@ -278,6 +302,20 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
             search_query = await translate_query_to_dutch(user_query)
             logger.info(f"Translated query: {search_query}")
 
+        classifier = IntentClassifier(api_key=openai_client.api_key, supabase_client=supabase)
+        # Classify the intent of the query
+        intent_match = classifier.classify_intent(search_query)
+        logger.info(f"*******************************Classified intent: {intent_match}")
+        if intent_match:
+            print(f"Intent: {intent_match.intent}")
+            print(f"Confidence: {intent_match.confidence:.3f}")
+            print(f"Extracted info: {intent_match.extracted_info}")
+
+            filters = classifier.get_document_filters(intent_match)
+            print(f"Document filters: {filters}")
+        else:
+            print("No specific intent detected - will use semantic search")
+
         # Get embedding and query Supabase concurrently (these are independent)
         logger.info("Running embedding generation and preparing for database query...")
 
@@ -287,8 +325,24 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
         # Wait for embedding to complete
         query_embedding = await embedding_task
 
+
         # Now query Supabase with the embedding
-        supabase_task = asyncio.create_task(get_supabase_results(query_embedding))
+        logger.info("Querying Supabase for relevant documentation...")
+        supabase_results = []
+        if intent_match:
+            # If intent match is found, use filters for the query
+            logger.info("Specific intent detected, using filters for semantic search")
+            document_matches = classifier.get_document_filters(intent_match)
+            filters = classifier.format_filters(document_matches)
+            logger.info(f"Using filters: {filters}")
+            supabase_task = asyncio.create_task(
+                get_supabase_results_with_filters(filters)
+            )
+        else:
+            # If no intent match, use the basic query
+            logger.info("No specific intent detected, using semantic search")
+            supabase_task = asyncio.create_task(get_supabase_results(query_embedding))
+
         supabase_results = await supabase_task
 
         if not supabase_results:
@@ -365,4 +419,4 @@ async def process_query(user_prompt, chat_history=None, model="gpt-3.5-turbo", s
 
     total_time = time.time() - start_time
     logger.info(f"Started streaming response after {total_time:.2f} seconds")
-    return stream_response()
+    return stream_response(), round(total_time, 2)
