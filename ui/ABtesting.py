@@ -53,7 +53,7 @@ async def process_query_model_a(query, chat_history):
 
 async def process_query_model_b(query, chat_history):
     """Process query using O4-mini"""
-    response, time_taken = await process_query(query, chat_history, "o4-mini", streaming=True)
+    response, time_taken = await process_query(query, chat_history, "gpt-4o-mini-2024-07-18", streaming=True)
     return response, time_taken
 
 async def stream_to_placeholder(stream_coro, placeholder):

@@ -199,7 +199,7 @@ async def render_regular_chat(language, supabase):
                 stream_generator, time_taken = await process_query(
                     user_input,
                     st.session_state.messages,
-                    "gpt-3.5-turbo",
+                    "gpt-4o-mini-2024-07-18",
                     streaming=True
                 )
 

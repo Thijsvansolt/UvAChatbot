@@ -42,7 +42,7 @@ def init_openai():
 
 openai_client = init_openai()
 
-async def get_completion(prompt, question, context, name_model="gpt-3.5-turbo"):
+async def get_completion(prompt, question, context, name_model="gpt-4o-mini-2024-07-18"):
     completion = await openai_client.chat.completions.create(
         model=name_model,
         messages=[
@@ -54,7 +54,7 @@ async def get_completion(prompt, question, context, name_model="gpt-3.5-turbo"):
     return completion.choices[0].message.content
 
 # Streaming version of get_completion
-async def get_completion_streaming(prompt, question, context, name_model="gpt-3.5-turbo"):
+async def get_completion_streaming(prompt, question, context, name_model="gpt-4o-mini-2024-07-18"):
     """Get completion with streaming support."""
     stream = await openai_client.chat.completions.create(
         model=name_model,
@@ -76,7 +76,7 @@ async def get_completion_streaming(prompt, question, context, name_model="gpt-3.
     # Return the full response at the end for logging/processing
     # return full_response
 
-async def translate_final_response(prompt, question, context, response_language='dutch', name_model="gpt-3.5-turbo"):
+async def translate_final_response(prompt, question, context, response_language='dutch', name_model="gpt-4o-mini-2024-07-18"):
     if response_language == 'dutch' or response_language == 'nl':
         language_prompt = f"{prompt}\n\nIBelangrijk reageer alleen in het nederlands."
     else:
@@ -94,7 +94,7 @@ async def translate_final_response(prompt, question, context, response_language=
     return completion.choices[0].message.content
 
 # Streaming version of translate_final_response
-async def translate_final_response_streaming(prompt, question, context, response_language='dutch', name_model="gpt-3.5-turbo"):
+async def translate_final_response_streaming(prompt, question, context, response_language='dutch', name_model="gpt-4o-mini-2024-07-18"):
     """Streaming version of translate_final_response."""
     if response_language == 'dutch' or response_language == 'nl':
         language_prompt = f"{prompt}\n\nIBelangrijk reageer alleen in het nederlands."
@@ -351,24 +351,14 @@ async def retrieve_documentation(user_query: str, original_language: str = None)
 
         # Format the results
         dutch_context = format_documentation_results(supabase_results)
-
-        # If the original query was not in Dutch, translate the context back
-        if original_language != 'dutch':
-            logger.info(f"Translating context back to {original_language}...")
-            translated_context = await translate_context_to_original_language(
-                dutch_context,
-                original_language
-            )
-            return translated_context
-
-        logger.info("Returning Dutch context (no translation needed)")
         return dutch_context
 
     except Exception as e:
         logger.error(f"Error retrieving documentation: {e}")
         return f"Error retrieving documentation: {str(e)}"
 
-async def process_query(user_prompt, chat_history=None, model="gpt-3.5-turbo", streaming=False):
+
+async def process_query(user_prompt, chat_history=None, model="gpt-4o-mini-2024-07-18", streaming=False):
     """
     Process user query with optimized concurrent API calls and optional streaming.
     """
@@ -417,6 +407,21 @@ async def process_query(user_prompt, chat_history=None, model="gpt-3.5-turbo", s
         ):
             yield chunk
 
-    total_time = time.time() - start_time
-    logger.info(f"Started streaming response after {total_time:.2f} seconds")
-    return stream_response(), round(total_time, 2)
+    if streaming:
+        total_time = time.time() - start_time
+        logger.info(f"Started streaming response after {total_time:.2f} seconds")
+        return stream_response(), round(total_time, 2)
+
+    if not streaming:
+        final_response = await translate_final_response(
+            Master_prompt,
+            user_prompt,
+            context,
+            response_language=original_language,
+            name_model=model
+        )
+        total_time = time.time() - start_time
+        logger.info(f"Generated final response in {total_time:.2f} seconds")
+        return final_response, round(total_time, 2)
+
+
