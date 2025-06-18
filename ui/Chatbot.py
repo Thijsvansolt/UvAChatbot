@@ -183,12 +183,14 @@ async def render_regular_chat(language, supabase):
         with st.chat_message("user"):
             st.markdown(f"**{get_text('user_label', language)}**\n\n{user_input}")
 
-        # Streaming response
-        with st.chat_message("assistant"):
-            st.markdown(f"**{get_text('assistant_label', language)}**")
-
+        # Setup assistant message
+        msg = st.chat_message("assistant")
+        msg.markdown(f"**{get_text('assistant_label', language)}**")
+        
+        # Add spinner while processing
+        with st.spinner(get_text("generating_answer", language)):
             # Create a placeholder for the streaming response
-            response_placeholder = st.empty()
+            response_placeholder = msg.empty()
             full_response = ""
 
             start_time = time.time()
@@ -233,7 +235,6 @@ async def render_regular_chat(language, supabase):
             except Exception as e:
                 logger.error(f"Error during streaming: {e}")
                 st.error(f"{get_text('error_occurred', language)} {str(e)}")
-
 
         # Rerun to display the new message with rating option
         st.rerun()
